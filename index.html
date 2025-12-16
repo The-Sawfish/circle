@@ -1,14 +1,11 @@
 <!DOCTYPE html>
-<!-- index.html — https://the-sawfish.github.io/circle/ -->
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Draw a Perfect Circle</title>
-
   <link rel="manifest" href="manifest.json" />
   <meta name="theme-color" content="#0f1220" />
-
   <style>
     :root{--bg:#0f1220;--panel:#171a2e;--accent:#7cf3c5;--accent2:#6aa8ff;--danger:#ff6b6b;--text:#e9ecff;--muted:#aab0ff}
     *{box-sizing:border-box}
@@ -23,44 +20,54 @@
     ol{margin:0;padding-left:18px}
     li{font-size:13px;margin-bottom:6px}
     #score{position:fixed;bottom:14px;left:50%;transform:translateX(-50%);background:rgba(0,0,0,.65);padding:6px 14px;border-radius:999px;font-weight:900}
-    .modal{position:fixed;inset:0;background:rgba(0,0,0,.6);display:none;place-items:center;z-index:20}
+    .modal{position:fixed;inset:0;background:rgba(0,0,0,.75);display:none;place-items:center;z-index:30}
     .modal.active{display:grid}
-    .box{background:var(--panel);padding:18px;border-radius:16px;width:280px;box-shadow:0 20px 50px rgba(0,0,0,.5)}
+    .box{background:var(--panel);padding:18px;border-radius:16px;width:300px;box-shadow:0 20px 50px rgba(0,0,0,.5)}
     .box h3{margin:0 0 8px;text-align:center}
+    .box p{font-size:13px;color:var(--muted);text-align:center}
     .box input{width:100%;padding:8px;border-radius:10px;border:none;margin-bottom:10px}
     .box button{width:100%;padding:8px;border-radius:999px;border:none;font-weight:800;margin-top:6px}
     .primary{background:linear-gradient(180deg,var(--accent),#9df7d2)}
     .secondary{background:linear-gradient(180deg,#999,#666);color:#111}
+    #offlineNotice{padding:12px;color:var(--danger);font-size:13px;text-align:center}
   </style>
 </head>
 <body>
 
-<header>
+<div class="modal" id="installModal">
+  <div class="box">
+    <h3>Add to Home Screen</h3>
+    <p>This game only works when installed as an app.</p>
+    <p><b>On iOS:</b> Share → Add to Home Screen</p>
+    <p><b>On Android:</b> Menu → Install App</p>
+  </div>
+</div>
+
+<header id="gameHeader" style="display:none">
   <h1>Draw a Perfect Circle</h1>
   <button id="resetBtn">Reset</button>
 </header>
 
-<main>
+<main id="gameRoot" style="display:none">
   <canvas id="canvas"></canvas>
-  <aside>
+  <aside id="leaderboardAside">
     <h2>🌍 Global Leaderboard</h2>
+    <div id="offlineNotice" style="display:none">Cannot load leaderboard while offline</div>
     <ol id="leaderboard"></ol>
   </aside>
 </main>
 
 <div id="score"></div>
 
-<!-- Share choice modal -->
 <div class="modal" id="shareModal">
   <div class="box">
     <h3>Share your score?</h3>
-    <p style="font-size:13px;color:var(--muted);text-align:center;margin:0 0 10px">Choose whether to submit your score to the global leaderboard.</p>
+    <p>Submit to the global leaderboard or keep it private.</p>
     <button class="primary" id="shareYes">Share Score</button>
     <button class="secondary" id="shareNo">Keep Private</button>
   </div>
 </div>
 
-<!-- Name modal -->
 <div class="modal" id="nameModal">
   <div class="box">
     <h3>Enter your name</h3>
@@ -70,104 +77,95 @@
 </div>
 
 <script type="module">
-  import { initializeApp } from "https://www.gstatic.com/firebasejs/12.6.0/firebase-app.js";
-  import { getFirestore, collection, addDoc, query, orderBy, limit, onSnapshot } from "https://www.gstatic.com/firebasejs/12.6.0/firebase-firestore.js";
+import { initializeApp } from "https://www.gstatic.com/firebasejs/12.6.0/firebase-app.js";
+import { getFirestore, collection, addDoc, query, orderBy, limit, onSnapshot } from "https://www.gstatic.com/firebasejs/12.6.0/firebase-firestore.js";
 
-  const firebaseConfig = {
-    apiKey: "AIzaSyBYfyYMZwoqHggwrxHWeqCxWaEK1NXzMX4",
-    authDomain: "circle-cff87.firebaseapp.com",
-    projectId: "circle-cff87",
-    storageBucket: "circle-cff87.firebasestorage.app",
-    messagingSenderId: "727679188338",
-    appId: "1:727679188338:web:4c2eb01521d34e874c31eb"
-  };
+// --- PWA GATE ---
+const isStandalone = window.matchMedia('(display-mode: standalone)').matches || window.navigator.standalone === true;
+const launchedFromAnotherPWA = document.referrer.startsWith('app://');
 
-  const app = initializeApp(firebaseConfig);
-  const db = getFirestore(app);
+if(!isStandalone || launchedFromAnotherPWA){
+  document.getElementById('installModal').classList.add('active');
+  throw new Error('Not running as installed PWA');
+}
 
-  const canvas=document.getElementById('canvas');
-  const ctx=canvas.getContext('2d');
-  const scoreEl=document.getElementById('score');
-  const lbEl=document.getElementById('leaderboard');
-  const shareModal=document.getElementById('shareModal');
-  const nameModal=document.getElementById('nameModal');
-  const nameInput=document.getElementById('nameInput');
+document.getElementById('gameHeader').style.display='flex';
+document.getElementById('gameRoot').style.display='flex';
 
-  let center={x:0,y:0};
-  const minRadius=50;
-  let drawing=false, locked=false, points=[], finalScore=null;
+// --- Firebase ---
+const firebaseConfig = {
+  apiKey: "AIzaSyBYfyYMZwoqHggwrxHWeqCxWaEK1NXzMX4",
+  authDomain: "circle-cff87.firebaseapp.com",
+  projectId: "circle-cff87",
+  storageBucket: "circle-cff87.firebasestorage.app",
+  messagingSenderId: "727679188338",
+  appId: "1:727679188338:web:4c2eb01521d34e874c31eb"
+};
+const app = initializeApp(firebaseConfig);
+const db = getFirestore(app);
 
-  function resize(){
-    canvas.width=window.innerWidth-document.querySelector('aside').offsetWidth;
-    canvas.height=window.innerHeight-52;
-    center={x:canvas.width/2,y:canvas.height/2};
-    drawCenter();
-  }
-  window.addEventListener('resize',resize);
+// --- Game ---
+const canvas=document.getElementById('canvas');
+const ctx=canvas.getContext('2d');
+const scoreEl=document.getElementById('score');
+const lbEl=document.getElementById('leaderboard');
+const offlineNotice=document.getElementById('offlineNotice');
+const shareModal=document.getElementById('shareModal');
+const nameModal=document.getElementById('nameModal');
+const nameInput=document.getElementById('nameInput');
+const leaderboardAside=document.getElementById('leaderboardAside');
 
-  function drawCenter(){
-    ctx.clearRect(0,0,canvas.width,canvas.height);
-    ctx.beginPath();ctx.arc(center.x,center.y,4,0,Math.PI*2);ctx.fillStyle='#7cf3c5';ctx.fill();
-    ctx.beginPath();ctx.arc(center.x,center.y,minRadius,0,Math.PI*2);ctx.strokeStyle='rgba(255,107,107,.35)';ctx.setLineDash([6,6]);ctx.stroke();ctx.setLineDash([]);
-  }
+let center={x:0,y:0};
+const minRadius=50;
+let drawing=false, locked=false, points=[], finalScore=null;
 
-  function pos(e){const r=canvas.getBoundingClientRect();return{ x:(e.touches?e.touches[0].clientX:e.clientX)-r.left, y:(e.touches?e.touches[0].clientY:e.clientY)-r.top }}
+function resize(){canvas.width=window.innerWidth-280;canvas.height=window.innerHeight-52;center={x:canvas.width/2,y:canvas.height/2};drawCenter()}
+window.addEventListener('resize',resize);
 
-  function start(e){ if(locked) return; drawing=true; points=[]; drawCenter(); const p=pos(e); points.push(p); ctx.beginPath(); ctx.moveTo(p.x,p.y); ctx.strokeStyle='#6aa8ff'; ctx.lineWidth=3 }
-  function move(e){ if(!drawing||locked) return; const p=pos(e); if(Math.hypot(p.x-center.x,p.y-center.y)<minRadius) return; points.push(p); ctx.lineTo(p.x,p.y); ctx.stroke() }
-  function end(){ if(!drawing||locked) return; drawing=false; locked=true; evaluate() }
+function drawCenter(){ctx.clearRect(0,0,canvas.width,canvas.height);ctx.beginPath();ctx.arc(center.x,center.y,4,0,Math.PI*2);ctx.fillStyle='#7cf3c5';ctx.fill();ctx.beginPath();ctx.arc(center.x,center.y,minRadius,0,Math.PI*2);ctx.strokeStyle='rgba(255,107,107,.35)';ctx.setLineDash([6,6]);ctx.stroke();ctx.setLineDash([])}
+function pos(e){const r=canvas.getBoundingClientRect();return{x:(e.touches?e.touches[0].clientX:e.clientX)-r.left,y:(e.touches?e.touches[0].clientY:e.clientY)-r.top}}
+function start(e){if(locked)return;drawing=true;points=[];drawCenter();const p=pos(e);points.push(p);ctx.beginPath();ctx.moveTo(p.x,p.y);ctx.strokeStyle='#6aa8ff';ctx.lineWidth=3}
+function move(e){if(!drawing||locked)return;const p=pos(e);if(Math.hypot(p.x-center.x,p.y-center.y)<minRadius)return;points.push(p);ctx.lineTo(p.x,p.y);ctx.stroke()}
+function end(){if(!drawing||locked)return;drawing=false;locked=true;evaluate()}
+function unwrap(a){const r=[a[0]];for(let i=1;i<a.length;i++){let v=a[i],p=r[i-1];while(v-p>Math.PI)v-=Math.PI*2;while(v-p<-Math.PI)v+=Math.PI*2;r.push(v)}return r}
 
-  function unwrap(a){const r=[a[0]];for(let i=1;i<a.length;i++){let v=a[i],p=r[i-1];while(v-p>Math.PI)v-=Math.PI*2;while(v-p<-Math.PI)v+=Math.PI*2;r.push(v)}return r}
+function evaluate(){
+  if(points.length<40){scoreEl.textContent='Too short';return}
+  const ang=unwrap(points.map(p=>Math.atan2(p.y-center.y,p.x-center.x)));
+  if(Math.abs(ang.at(-1)-ang[0])<Math.PI*1.9){scoreEl.textContent='Not a full circle';return}
+  const r=points.map(p=>Math.hypot(p.x-center.x,p.y-center.y));
+  const m=r.reduce((s,v)=>s+v,0)/r.length;
+  const std=Math.sqrt(r.reduce((s,v)=>s+(v-m)**2,0)/r.length);
+  const c=Math.hypot(points[0].x-points.at(-1).x,points[0].y-points.at(-1).y);
+  finalScore=Math.round((100-std*1.6-c*0.8)*10)/10;
+  scoreEl.textContent=`Score: ${finalScore}`;
 
-  function evaluate(){
-    if(points.length<40){scoreEl.textContent='Too short';return}
-    const ang=unwrap(points.map(p=>Math.atan2(p.y-center.y,p.x-center.x)));
-    if(Math.abs(ang.at(-1)-ang[0])<Math.PI*1.9){scoreEl.textContent='Not a full circle';return}
-    const r=points.map(p=>Math.hypot(p.x-center.x,p.y-center.y));
-    const m=r.reduce((s,v)=>s+v,0)/r.length;
-    const std=Math.sqrt(r.reduce((s,v)=>s+(v-m)**2,0)/r.length);
-    const c=Math.hypot(points[0].x-points.at(-1).x,points[0].y-points.at(-1).y);
-    finalScore=Math.round((100-std*1.6-c*0.8)*10)/10;
-    scoreEl.textContent=`Score: ${finalScore}`;
+  if(!navigator.onLine){
+    leaderboardAside.style.display='none';
+    offlineNotice.style.display='block';
+  } else {
     shareModal.classList.add('active');
   }
+}
 
-  document.getElementById('shareYes').onclick=()=>{
-    shareModal.classList.remove('active');
-    nameModal.classList.add('active');
-  };
+document.getElementById('shareYes').onclick=()=>{shareModal.classList.remove('active');nameModal.classList.add('active')}
+document.getElementById('shareNo').onclick=()=>{shareModal.classList.remove('active')}
+document.getElementById('submitBtn').onclick=async()=>{const name=nameInput.value.trim();if(!name)return;await addDoc(collection(db,'scores'),{name,score:finalScore,time:Date.now()});nameModal.classList.remove('active');nameInput.value=''}
 
-  document.getElementById('shareNo').onclick=()=>{
-    shareModal.classList.remove('active');
-  };
+const q=query(collection(db,'scores'),orderBy('score','desc'),limit(10));
+if(navigator.onLine){onSnapshot(q,s=>{lbEl.innerHTML='';s.forEach(d=>{const li=document.createElement('li');li.textContent=`${d.data().name} — ${d.data().score}`;lbEl.appendChild(li)})})}
 
-  document.getElementById('submitBtn').onclick=async()=>{
-    const name=nameInput.value.trim(); if(!name) return;
-    await addDoc(collection(db,'scores'),{ name, score:finalScore, time:Date.now() });
-    nameModal.classList.remove('active'); nameInput.value='';
-  };
+document.getElementById('resetBtn').onclick=()=>{locked=false;finalScore=null;scoreEl.textContent='';drawCenter();leaderboardAside.style.display='flex';offlineNotice.style.display='none'}
 
-  const q=query(collection(db,'scores'),orderBy('score','desc'),limit(10));
-  onSnapshot(q,snap=>{
-    lbEl.innerHTML='';
-    snap.forEach(d=>{
-      const li=document.createElement('li');
-      li.textContent=`${d.data().name} — ${d.data().score}`;
-      lbEl.appendChild(li);
-    });
-  });
+canvas.addEventListener('mousedown',start);
+canvas.addEventListener('mousemove',move);
+canvas.addEventListener('mouseup',end);
+canvas.addEventListener('touchstart',e=>{e.preventDefault();start(e)});
+canvas.addEventListener('touchmove',e=>{e.preventDefault();move(e)});
+canvas.addEventListener('touchend',e=>{e.preventDefault();end()});
 
-  document.getElementById('resetBtn').onclick=()=>{locked=false;finalScore=null;scoreEl.textContent='';drawCenter()};
-
-  canvas.addEventListener('mousedown',start);
-  canvas.addEventListener('mousemove',move);
-  canvas.addEventListener('mouseup',end);
-  canvas.addEventListener('touchstart',e=>{e.preventDefault();start(e)});
-  canvas.addEventListener('touchmove',e=>{e.preventDefault();move(e)});
-  canvas.addEventListener('touchend',e=>{e.preventDefault();end()});
-
-  resize();
-  if('serviceWorker'in navigator) navigator.serviceWorker.register('sw.js');
+resize();
+if('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js');
 </script>
 
 </body>
