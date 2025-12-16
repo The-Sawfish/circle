@@ -2,7 +2,9 @@
   "name": "Draw a Perfect Circle",
   "short_name": "Circle",
   "start_url": "/circle/",
+  "scope": "/circle/",
   "display": "standalone",
+  "orientation": "portrait",
   "background_color": "#0f1220",
   "theme_color": "#0f1220"
 }
