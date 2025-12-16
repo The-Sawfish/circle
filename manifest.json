@@ -1,0 +1,8 @@
+{
+  "name": "Draw a Perfect Circle",
+  "short_name": "Circle",
+  "start_url": "/circle/",
+  "display": "standalone",
+  "background_color": "#0f1220",
+  "theme_color": "#0f1220"
+}
